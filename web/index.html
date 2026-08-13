@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="theme-color" content="#10161c"/>
+<title>AI Scientist · Research Workspace</title>
+<link rel="stylesheet" href="/static/styles.css?v=20260813-export4"/>
+</head>
+<body>
+<div class="app">
+  <aside class="left">
+    <div class="brand">
+      <div class="logo" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M16 3.5 20 12l8.5 4-8.5 4-4 8.5-4-8.5-8.5-4 8.5-4 4-8.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="16" cy="16" r="2.7" fill="currentColor"/></svg></div>
+      <div><b>AI Scientist</b><small>Research operating system</small></div>
+    </div>
+
+    <button class="new-btn" id="newResearchBtn" type="button">
+      <span><span class="new-plus" aria-hidden="true">+</span> 新建研究</span>
+      <span class="shortcut">Science125</span>
+    </button>
+
+    <div class="left-search">
+      <div><svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="10.8" cy="10.8" r="5.8" stroke="currentColor" stroke-width="1.7"/><path d="m15.2 15.2 4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><input id="historySearch" placeholder="搜索历史研究" aria-label="搜索历史研究"/></div>
+    </div>
+
+    <div class="history-title"><span>研究档案</span><small>RECENT</small></div>
+    <div class="history" id="historyList"><div class="history-empty">正在读取历史研究…</div></div>
+
+    <div class="left-footer">
+      <div class="avatar">RS</div>
+      <div><b>Researcher</b><small>Local environment</small></div>
+      <span class="footer-status" title="服务运行状态"></span>
+    </div>
+  </aside>
+
+  <main class="center">
+    <header class="topbar">
+      <div class="top-title">
+        <span class="qid" id="topQid">AI</span>
+        <div><span class="workspace-label">ACTIVE RESEARCH</span><b id="topTitle">请选择一个 Science125 问题</b></div>
+        <span class="top-tag" id="topCategory">Mock</span>
+      </div>
+      <div class="top-actions">
+        <span class="api-status" id="apiStatus"><i></i> 本地服务</span>
+        <button class="danger-btn" id="stopBtn" type="button" disabled>停止研究</button>
+      </div>
+    </header>
+
+    <div class="chat-wrap" id="chatWrap">
+      <div class="chat-inner" id="chatInner">
+        <div class="welcome">
+          <div class="welcome-orbit" aria-hidden="true"><span></span><i></i><b></b></div>
+          <p class="welcome-kicker">SCIENTIFIC INFERENCE WORKBENCH</p>
+          <h1>让每一个研究假设<br>都经得起推敲。</h1>
+          <p>选择一个 Science125 问题。系统将组织证据、提出可验证假设，并以思辨、溯源、因果三个维度完成审查。</p>
+          <div class="welcome-actions"><button class="primary-btn" id="welcomeStart" type="button">开始一项研究 <span aria-hidden="true">→</span></button><span>125 个模拟研究问题</span></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+
+
+  <div class="composer-wrap">
+    <div class="composer-box">
+      <div class="composer-prompt">EXPERT INPUT</div>
+      <textarea id="expertInput" placeholder="开始研究后，可随时在这里提出专家意见…" aria-label="专家意见" disabled></textarea>
+      <div class="composer-foot"><div class="composer-tools"><button type="button" disabled>引用证据</button><button type="button" disabled>添加链接</button></div><button class="send" id="sendBtn" type="button" disabled>提交意见 <span aria-hidden="true">→</span></button></div>
+    </div>
+    <div class="composer-hint">人工意见会加入当前研究，并重新执行受影响的审查环节</div>
+  </div>
+</div>
+
+<div class="modal-bg" id="questionModalBg"></div>
+<section class="question-modal" id="questionModal" role="dialog" aria-modal="true" aria-labelledby="questionModalTitle">
+  <div class="modal-head"><div><span class="panel-label">SCIENCE 125</span><h2 id="questionModalTitle">选择研究问题</h2><p>从不同学科的科学命题开始一次可审计的研究。</p></div><button id="closeQuestionModal" type="button" aria-label="关闭问题选择">×</button></div>
+  <div class="question-toolbar"><div class="question-search"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="10.8" cy="10.8" r="5.8" stroke="currentColor" stroke-width="1.7"/><path d="m15.2 15.2 4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><input id="questionSearch" placeholder="搜索题号或关键词" aria-label="搜索问题"/></div><select id="questionCategory" aria-label="按领域筛选问题"><option>全部</option><option>生命科学</option><option>物理学</option><option>天文学</option><option>地球与环境</option><option>技术与工程</option><option>心理与认知</option></select></div>
+  <div class="question-count" id="questionCount">读取中…</div>
+  <div class="question-grid" id="questionGrid"></div>
+</section>
+
+<div class="drawer-bg" id="drawerBg"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle"><div class="modal-head"><div><span class="panel-label">REVIEW DETAIL</span><h2 id="drawerTitle">审查详情</h2></div><button id="closeDrawer" type="button" aria-label="关闭审查详情">×</button></div><div id="drawerContent"></div></aside>
+
+<script src="/static/vendor/gsap.min.js?v=3.13.0"></script>
+<script src="/static/app.js?v=20260813-export7"></script>
+</body>
+</html>
