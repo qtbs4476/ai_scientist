@@ -2,11 +2,32 @@
 
 ## 2026-09-02
 
-### 1. 首页隐藏「返回首页」和「反馈」按钮
+### 1. 左右边框栏同时收起时中间区域留白修复
+- **改动文件**：`web/styles.css`
+- **需求**：左右边框栏都收起时，中间区域应铺满全屏，而不是右侧出现一片空白。
+- **根因**：`.app` 是三列网格 `272px minmax(0,1fr) 280px`（左栏/中间/右栏）。左收起规则 `.app.has-research.sidebar-collapsed`（3 个类）优先级高于右收起规则 `.app.feedback-collapsed`（1 个类），因此两者同时存在时，只有左收起规则生效，网格为 `0 minmax(0,1fr) 280px`——右栏仍保留 280px 但面板被隐藏（`visibility:hidden`），中间右侧留下一片空白。
+- **改动**：在 `styles.css` 第 18 行左收起规则后新增组合规则：
+  ```css
+  .app.has-research.sidebar-collapsed.feedback-collapsed{grid-template-columns:0 minmax(0,1fr) 0}
+  .app.has-research.sidebar-collapsed.feedback-collapsed .topbar{grid-column:2 / 3}
+  ```
+  该选择器（4 个类）优先级高于两个单边收起规则，左右同时收起时三列均归零，中间区域自动铺满；并同步把顶栏从默认跨列 `2 / 4` 收窄为 `2 / 3`。网格自带 `transition:grid-template-columns .22s`，收起动画平滑。
+
+### 2. 首页隐藏「返回首页」和「反馈」按钮
 - **改动文件**：`web/styles.css`
 - **需求**：右上角「返回首页」(`#homeBtn`) 和「反馈」(`#feedbackToggle`) 图标仅在研究项目开始后显示，在首页不显示。
 - **改动**：在 `styles.css` 第 106 行已有规则 `.app:not(.has-research) .danger-btn{display:none}` 之后，新增 `.app:not(.has-research) .home-btn,.app:not(.has-research) .fb-toggle-btn{display:none}`。
 - **原理**：应用通过 `.app` 元素的 `has-research` CSS 类区分首页与研究中状态（`setWorkspaceMode(true/false)` 切换）。首页时无此类，CSS 选择器匹配并隐藏两个按钮；研究开始后添加此类，按钮自动显示。与已有的 `.danger-btn`（取消按钮）隐藏逻辑完全一致。
+
+### 2. 首页固定展开侧栏 + 移除收起按钮
+- **改动文件**：`web/styles.css`、`web/index.html`
+- **需求**：首页（未开始研究）不需要收起历史档案栏的能力，侧栏恒为展开；研究工作区保持可收起。
+- **改动**：
+  1. `styles.css:18` 两条收起规则的选择器由 `.app.sidebar-collapsed` 收窄为 `.app.has-research.sidebar-collapsed`，使 `sidebar-collapsed` 类在首页成为空操作。
+  2. `styles.css:106` 在已有的首页隐藏按钮规则里追加 `.app:not(.has-research) .sidebar-toggle{display:none}`。
+  3. `index.html:9` 样式表版本号 `?v=20260901-fb-preview` → `?v=20260902-home-sidebar`，避免沿用旧缓存。
+- **原理**：`sidebar-collapsed` 状态记在 `localStorage`（`ai_scientist.sidebar.collapsed.v1`），首页与工作区共用同一份。若只在首页藏掉按钮，用户从「已收起」的工作区返回首页时会留下 272px 空白条且没有按钮能恢复。因此改在 CSS 层把「收起」限定到 `.has-research`：首页无论类名如何都渲染完整侧栏，`localStorage` 与工作区切换逻辑都不动，`#sidebarToggle` 元素也保留（`app.js:161` 依赖它存在，删 DOM 会让 `init()` 抛错）。
+- **验证**：1700px 桌面视口实测四种状态 —— 首页 `第一列=272px / .left visible / 按钮 display:none`；首页强加 `sidebar-collapsed` 仍为 `272px / visible`；工作区点按钮 → `0px / hidden`，再点 → `272px / visible`。
 
 ## 2026-09-01
 
