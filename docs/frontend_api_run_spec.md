@@ -206,8 +206,6 @@ agent_critic: {
   };
   top_flaw: string;           // 致命缺陷诊断（≥10 字符）
   counterfactual: string;     // 反事实攻击场景（≥15 字符）
-  counterfactual_severity?: number;      // 反事实条件严苛度 0-10（可选）
-  counterfactual_vulnerability?: number; // 假设脆弱度 0-10（可选）
   missing_evidences: string[]; // 缺失证据清单
   detailed_review: string;    // 详细评审意见（≥30 字符，Markdown 格式）
 }
@@ -663,8 +661,6 @@ interface CriticOutput {
   scores: DimensionScores;
   top_flaw: string;
   counterfactual: string;
-  counterfactual_severity?: number;
-  counterfactual_vulnerability?: number;
   missing_evidences: string[];
   detailed_review: string;
 }

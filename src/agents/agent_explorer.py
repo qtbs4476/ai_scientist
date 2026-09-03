@@ -48,27 +48,9 @@ llm = ChatOpenAI(
     api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url=os.getenv("DASHSCOPE_API_BASE", _DEFAULT_API_BASE),
     temperature=0.6,
-    max_tokens=16384,
+    max_tokens=4096,
     timeout=180.0,
 )
-
-_vl_llm = None
-
-
-def _get_vl_llm() -> ChatOpenAI:
-    global _vl_llm
-    if _vl_llm is None:
-        vl_key = os.getenv("DASHSCOPE_API_KEY_VL") or os.getenv("DASHSCOPE_API_KEY")
-        vl_base = os.getenv("DASHSCOPE_API_BASE_VL") or os.getenv("DASHSCOPE_API_BASE", _DEFAULT_API_BASE)
-        _vl_llm = ChatOpenAI(
-            model=os.getenv("QWEN_VL_MODEL", "qwen3.8-flash"),
-            api_key=vl_key,
-            base_url=vl_base,
-            temperature=0.4,
-            max_tokens=16384,
-            timeout=180.0,
-        )
-    return _vl_llm
 
 
 # ============================================================
@@ -213,8 +195,7 @@ def _hybrid_retrieve(
 def explore(
     question: str,
     top_k: int = 3,
-    max_retries: int = 3,
-    images: Optional[List[Dict[str, str]]] = None,
+    max_retries: int = 3
 ) -> ExplorerOutput:
     """
     执行探索
@@ -223,7 +204,6 @@ def explore(
         question: 用户科学问题
         top_k: 向量检索返回文档数
         max_retries: 最大重试次数
-        images: 可选图片列表，每项含 name + data（data URL）
 
     Returns:
         ExplorerOutput: 包含问题骨架、证据、缺口、类比
@@ -231,8 +211,6 @@ def explore(
     Raises:
         RuntimeError: 超过最大重试次数仍失败
     """
-    has_images = bool(images)
-
     # 1. 向量检索（分来源融合：本地知识库 + 至少 1 条 arXiv 在线文献）
     chroma = ChromaService()
     results = _hybrid_retrieve(chroma, question, top_k=top_k)
@@ -246,7 +224,10 @@ def explore(
     else:
         evidence_context = "（未检索到相关文献，请基于跨域类比推理）"
 
-    text_content = f"""## 用户问题
+    messages = [
+        SystemMessage(content=SYSTEM_PROMPT),
+        HumanMessage(content=f"""
+## 用户问题
 {question}
 
 ## 本地知识库检索结果（文献片段）
@@ -258,32 +239,11 @@ def explore(
 1. 如果文献片段不足，请主动从物理、生物、计算机、数学等学科中寻找类比案例
 2. 类比必须说明 mapping_relation（如何映射到本问题）
 3. 证据列表中每条都必须有 source 字段
-"""
-
-    if has_images:
-        text_content += "\n4. 用户提供了相关图片，请结合图片内容进行分析，提取其中的科学信息作为证据\n"
-
-    if has_images:
-        content_blocks: list = [{"type": "text", "text": text_content}]
-        for img in images:
-            data_url = img.get("data", "")
-            if data_url:
-                content_blocks.append({
-                    "type": "image_url",
-                    "image_url": {"url": data_url},
-                })
-        human_msg = HumanMessage(content=content_blocks)
-    else:
-        human_msg = HumanMessage(content=text_content)
-
-    messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        human_msg,
+""")
     ]
 
     # 3. 调用模型（带重试）
-    active_llm = _get_vl_llm() if has_images else llm
-    structured_llm = active_llm.with_structured_output(ExplorerOutput)
+    structured_llm = llm.with_structured_output(ExplorerOutput)
 
     last_error = None
     for attempt in range(1, max_retries + 1):
@@ -294,7 +254,7 @@ def explore(
             except Exception as structured_err:
                 logger.info("结构化输出失败，降级为纯文本 JSON 解析: %s",
                             type(structured_err).__name__)
-                raw = active_llm.invoke(messages)
+                raw = llm.invoke(messages)
                 raw_text = raw.content if hasattr(raw, "content") else str(raw)
                 result = parse_llm_json_to_model(raw_text, ExplorerOutput)
 

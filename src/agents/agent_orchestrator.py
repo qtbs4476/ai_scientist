@@ -205,8 +205,6 @@ def run_full_pipeline(
     cancel_check: Optional[Callable[[], bool]] = None,
     auto_search_papers: bool = False,
     paper_granularity: str = "fast",
-    images: Optional[List[Dict[str, str]]] = None,
-    documents: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """
     执行完整流水线
@@ -242,7 +240,6 @@ def run_full_pipeline(
     # ====== 读取上一轮快照，将 Critic 评审结果传给 Scientist ======
     prev_critic_output = None
     prev_overall_score = None
-    prev_explorer_output = None
     prev_round_num = int(round_label[1:])
     if prev_round_num > 1:
         prev_round_label = f"V{prev_round_num - 1}"
@@ -250,7 +247,6 @@ def run_full_pipeline(
         if prev_snapshot:
             prev_critic_output = prev_snapshot.get("agent_critic")
             prev_overall_score = prev_snapshot.get("overall_score")
-            prev_explorer_output = prev_snapshot.get("agent_explorer")
             logger.info(f"已加载上一轮 {prev_round_label} Critic 结果（综合得分 {prev_overall_score}），将注入 Scientist")
         else:
             logger.info(f"上一轮 {prev_round_label} 快照不存在，本轮 Scientist 不参考历史评审")
@@ -280,30 +276,13 @@ def run_full_pipeline(
             logger.warning(f"自动检索文献失败，跳过（不影响主流程）: {e}")
             _paper_svc = None  # 标记不清理
 
-    # ====== 解析用户上传的文档（PDF/Markdown）======
-    document_texts = []
-    if documents:
-        try:
-            from services.document_parser import parse_documents
-            document_texts = parse_documents(documents)
-            if document_texts:
-                logger.info(f"📄 文档解析成功: {len(document_texts)} 个文档")
-        except Exception as e:
-            logger.warning(f"文档解析失败，跳过（不影响主流程）: {e}")
-
     try:
-        # Step 1: Explorer（V2/V3 复用上一轮检索结果，避免证据逐轮退化）
-        if prev_explorer_output:
-            logger.info("Step 1: 复用上一轮 Explorer 检索结果（跳过重新检索）")
-            if progress_callback:
-                progress_callback("explorer", 15)
-            explorer_result = ExplorerOutput(**prev_explorer_output)
-        else:
-            logger.info("Step 1: 探索者执行中...")
-            if progress_callback:
-                progress_callback("explorer", 15)
-            _check_cancel()
-            explorer_result = explore(question, images=images)
+        # Step 1: Explorer
+        logger.info("Step 1: 探索者执行中...")
+        if progress_callback:
+            progress_callback("explorer", 15)
+        _check_cancel()
+        explorer_result = explore(question)
 
         # Step 2: Scientist
         logger.info("Step 2: 科学家执行中...")
@@ -318,8 +297,6 @@ def run_full_pipeline(
             feedback=feedback,
             prev_critic_output=prev_critic_output,
             prev_overall_score=prev_overall_score,
-            images=images,
-            document_texts=document_texts,
         )
 
         # Step 3: Critic
@@ -328,15 +305,12 @@ def run_full_pipeline(
             progress_callback("critic", 85)
         _check_cancel()
         prev_scores_for_critic = None
-        prev_cf_for_critic = None
         if prev_critic_output:
             prev_scores_for_critic = prev_critic_output.get("scores")
-            prev_cf_for_critic = prev_critic_output.get("counterfactual")
         critic_result = critique(
             hypotheses=[h.model_dump() for h in scientist_result.hypotheses],
             round_label=round_label,
             prev_scores=prev_scores_for_critic,
-            prev_counterfactual=prev_cf_for_critic,
         )
 
         # Step 4: 计算综合得分
@@ -372,7 +346,7 @@ def run_full_pipeline(
             "agent_critic": critic_result.model_dump(),
             "overall_score": overall_score,
             "granularity_score": granularity_score,
-            "human_feedback": [{"content": feedback, "images": images or [], "documents": documents or []}] if feedback else [],
+            "human_feedback": [{"content": feedback}] if feedback else [],
             "granularity_stats": granularity_stats,
         }
 
@@ -399,7 +373,7 @@ def run_full_pipeline(
                     scientist_output=scientist_result.model_dump(),
                     critic_output=critic_result.model_dump(),
                     granularity_stats=granularity_stats,
-                    human_feedback=[{"content": feedback, "images": images or [], "documents": documents or []}] if feedback else []
+                    human_feedback=[{"content": feedback}] if feedback else []
                 )
                 db.add(record)
                 db.commit()
@@ -447,7 +421,7 @@ def iterate_with_feedback(
     # 集中式 V3 边界守卫（防御性：main.py 端点已校验，这里兜底）
     validate_round_limit(current_round)
     next_round = next_round_label(current_round)
-    logger.info(f"收到反馈，触发 {next_round} 迭代（复用上一轮证据检索）...")
+    logger.info(f"收到反馈，触发 {next_round} 全链路重跑...")
 
     return run_full_pipeline(
         question=question,
@@ -563,22 +537,13 @@ def get_chart_risk(project_id: Optional[str] = None) -> Dict[str, Any]:
     if not snapshots:
         return {"xAxis": [], "risk_index": [], "level": []}
 
+    # 根据 counterfactual 长度粗略估算风险指数（越短说明越苛刻=风险越高）
     risk_levels = []
     for s in snapshots:
-        critic = s["agent_critic"]
-        severity = critic.get("counterfactual_severity")
-        vulnerability = critic.get("counterfactual_vulnerability")
-
-        if severity is not None and vulnerability is not None:
-            # 新逻辑：风险 = 严苛度 × 脆弱度 / 10，映射到 0-10
-            risk = round(severity * vulnerability / 10, 2)
-        else:
-            # 旧快照兼容：回退到长度启发式
-            cf = critic.get("counterfactual", "")
-            risk = max(0, min(10, 10 - len(cf) / 20))
-            risk = round(risk, 2)
-
-        risk_levels.append(min(10, risk))
+        cf = s["agent_critic"].get("counterfactual", "")
+        # 简单启发：长度越短风险越高（更苛刻的条件）
+        risk = max(0, min(10, 10 - len(cf) / 20))
+        risk_levels.append(round(risk, 2))
 
     return {
         "xAxis": [s["round"] for s in snapshots],
@@ -652,10 +617,8 @@ def _get_suggest_llm():
             api_key=os.getenv("DASHSCOPE_API_KEY"),
             base_url=os.getenv("DASHSCOPE_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
             temperature=0.5,
-            max_tokens=2048,
-            timeout=60.0,
-            # 建议生成是轻量任务：关闭思考模式，避免 reasoning token 占满输出预算导致 content 为空
-            extra_body={"enable_thinking": False},
+            max_tokens=512,
+            timeout=30.0,
         )
     return _suggest_llm
 

@@ -14,7 +14,6 @@
 - **人在回路迭代**：专家反馈可触发 V1 → V2 → V3 全链路重新研究。
 - **后台任务管理**：支持排队、进度轮询、取消、失败重试和刷新恢复。
 - **研究档案与报告**：按项目保存历史轮次，提供趋势图表、完整报告和 Markdown 下载。
-- **多模态图片理解**：支持在输入框粘贴或上传图片（截图、图表、公式等），自动调用视觉模型提取科学信息作为研究证据。
 - **开箱即用存储**：默认使用 SQLite，可选 MySQL；知识库默认使用本地 Chroma。
 
 ## 系统流程
@@ -39,7 +38,7 @@ Critic ── 五维评分、致命缺陷、反事实攻击、缺失证据
 
 | 层级 | 技术 |
 |---|---|
-| 大模型 | 阿里云百炼 DashScope、Qwen（文本 + 视觉多模态） |
+| 大模型 | 阿里云百炼 DashScope、Qwen |
 | 智能体 | LangChain、LangGraph、Pydantic |
 | 后端 | FastAPI、Uvicorn |
 | 向量检索 | ChromaDB、DashScope Embedding |
@@ -77,22 +76,37 @@ pip install -r requirements.txt
 
 ### 3. 配置环境变量
 
-复制模板并填写：
-
-```bash
-cp .env.example .env
-```
-
-然后编辑 `.env`，至少需要填写 `DASHSCOPE_API_KEY`：
+在项目根目录创建 `.env`：
 
 ```dotenv
+# 阿里云百炼
 DASHSCOPE_API_KEY=your_dashscope_api_key
-QWEN_MODEL=qwen3.7-plus
+DASHSCOPE_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+QWEN_MODEL=qwen-plus   # 建议 qwen-plus；当前本地 .env 实测用 qwen3.7-plus
+
+# 向量模型；可按百炼账号可用模型调整
+QWEN_MODEL_EMBEDDING=qwen3.7-text-embedding
+DASHSCOPE_API_KEY_EMBEDDING=
+
+# 服务
+PORT=8848
+AUTO_OPEN_BROWSER=1
+
+# 本地向量库
+CHROMA_DB_PATH=./data/chroma_db
+CHROMA_COLLECTION_NAME=ai_scientist_literature
+
+# 在线检索文献保留开关：true 保留（供 125 题全量复用证据），false 精确清理本次临时文献
+KEEP_SEARCHED_PAPERS=false
+
+# OpenAlex 礼貌池邮箱（离线采集 X-Token/mailto，可选）
+OPENALEX_EMAIL=
+
+# 默认无需配置，系统会使用 SQLite
+# DATABASE_URL=sqlite:///data/ai_scientist.db
 ```
 
-完整配置项见 `.env.example`，包含模型选择、向量库、数据库、LangSmith 追踪等所有可选参数。
-
-> 不要将包含真实 API Key 的 `.env` 提交到 GitHub。模板文件 `.env.example` 已提交到仓库，可直接参考。
+> 不要将包含真实 API Key 的 `.env` 提交到 GitHub。
 
 ### 4. 启动
 
@@ -102,7 +116,7 @@ Windows 用户可以直接双击：
 start.bat
 ```
 
-脚本会结束占用 `8000` 端口的旧进程、启动服务，等待页面可访问后自动打开浏览器。
+脚本会结束占用 `8848` 端口的旧进程、启动服务，等待页面可访问后自动打开浏览器。
 
 也可以手动启动（**必须用项目 venv 内的 python，并从项目根目录运行**，否则会因缺少 `langchain_chroma` 等依赖或找不到 `src.main` 而失败）：
 
@@ -113,19 +127,18 @@ venv\Scripts\python.exe src\main.py
 然后访问：
 
 ```text
-http://127.0.0.1:8000/static/index.html
+http://127.0.0.1:8848/static/index.html
 ```
 
 首次启动且已配置 DashScope API Key 时，如果 Chroma 知识库为空，系统会自动写入内置种子文献。
 
 ## 使用方式
 
-1. 点击”新建研究”，选择示例问题或输入自定义科学问题。
-2. 可在输入框粘贴或上传图片（截图、图表、公式等），系统会自动调用视觉模型分析图片内容。
-3. 等待 Explorer、Scientist、Critic 流水线完成。
-4. 查看证据、候选假设、实验计划、五维评分和迭代图表。
-5. 在底部输入专家意见，生成下一轮研究结果。
-6. 最多迭代至 V3，可随时查看历史轮次或下载 Markdown 报告。
+1. 点击“新建研究”，选择示例问题或输入自定义科学问题。
+2. 等待 Explorer、Scientist、Critic 流水线完成。
+3. 查看证据、候选假设、实验计划、五维评分和迭代图表。
+4. 在底部输入专家意见，生成下一轮研究结果。
+5. 最多迭代至 V3，可随时查看历史轮次或下载 Markdown 报告。
 
 研究任务在后台执行。切换项目或返回首页不会中断任务；需要终止时使用顶部“取消”按钮。
 
@@ -135,16 +148,11 @@ http://127.0.0.1:8000/static/index.html
 |---|---:|---|---|
 | `DASHSCOPE_API_KEY` | 是 | — | 阿里云百炼 API Key |
 | `DASHSCOPE_API_BASE` | 否 | 百炼兼容接口 | OpenAI 兼容 API 地址 |
-| `QWEN_MODEL` | 否 | `qwen3.8-flash` | Explorer、Orchestrator 使用的模型 |
-| `QWEN_MODEL_SCIENTIST` | 否 | 同 `QWEN_MODEL` | Scientist 专用模型，留空则统一使用 `QWEN_MODEL`；当前用 `qwen3.7-plus`，质量不足可升 `qwen3.8-max` |
-| `QWEN_MODEL_CRITIC` | 否 | 同 `QWEN_MODEL` | Critic 专用模型，留空则统一使用 `QWEN_MODEL`；需支持 JSON Schema 结构化输出（如 `qwen3.7-flash`） |
-| `QWEN_VL_MODEL` | 否 | `qwen3.8-flash` | 视觉模型，用于多模态图片理解；可选 `qwen3.8-flash` / `qwen3.7-plus` / `qwen3.8-max`（旧版 `qwen-vl-*` 已弃用） |
-| `DASHSCOPE_API_KEY_VL` | 否 | 主 API Key | 视觉模型独立 API Key，留空则复用 `DASHSCOPE_API_KEY` |
-| `DASHSCOPE_API_BASE_VL` | 否 | 百炼兼容接口 | 视觉模型 API 地址，留空则复用 `DASHSCOPE_API_BASE` |
+| `QWEN_MODEL` | 否 | `qwen-plus` | Explorer、Scientist、Critic 使用的模型（本地实测 `qwen3.7-plus`） |
 | `QWEN_MODEL_EMBEDDING` | 否 | 项目配置值 | Chroma 文档向量模型（`qwen3.7-text-embedding`，1024 维） |
 | `DASHSCOPE_API_KEY_EMBEDDING` | 否 | 主 API Key | 独立的 Embedding API Key |
-| `DASHSCOPE_API_BASE_EMBEDDING` | 否 | 百炼兼容接口 | Embedding 模型 API 地址 |
-| `APP_PORT` | 否 | `8000` | Web 服务端口 |
+| `PORT` | 否 | `8848` | Web 服务端口 |
+| `AUTO_OPEN_BROWSER` | 否 | `1` | 启动后是否自动打开浏览器 |
 | `CHROMA_DB_PATH` | 否 | `./data/chroma_db` | Chroma 持久化目录 |
 | `CHROMA_COLLECTION_NAME` | 否 | `ai_scientist_literature` | Chroma collection 名称 |
 | `KEEP_SEARCHED_PAPERS` | 否 | `false` | 在线检索（arXiv）入库文献跑完后是否保留在向量库 |
@@ -183,7 +191,7 @@ MYSQL_DATABASE=ai_scientist
 示例：
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/run \
+curl -X POST http://127.0.0.1:8848/api/run \
   -H "Content-Type: application/json" \
   -d '{"question":"如何从观测数据中稳健识别因果效应？","initial_round":"V1"}'
 ```
@@ -240,4 +248,3 @@ python -m tests.test_fallback_parser
 - 大模型生成内容可能存在事实或引用偏差，研究结果必须由领域专家复核。
 - 系统用于辅助提出和评估研究假设，不应替代实验验证、同行评议或正式科研决策。
 - 首次运行会调用模型和 Embedding API，可能产生相应的云服务费用。
-
