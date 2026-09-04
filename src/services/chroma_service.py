@@ -34,7 +34,7 @@ class ChromaService:
     def __init__(
         self,
         persist_directory: Optional[str] = None,
-        collection_name: str = "knowledge_base"
+        collection_name: Optional[str] = None,
     ):
         # 允许相对路径，但以项目根为基准
         default_path = os.getenv("CHROMA_DB_PATH", "./data/chroma_db")
@@ -42,7 +42,20 @@ class ChromaService:
             default_path = str(_PROJECT_ROOT / default_path)
         self.persist_directory = persist_directory or default_path
 
-        self.collection_name = collection_name
+        # collection_name 解析优先级：
+        #   1) 调用方显式传非空字符串（兼容旧代码 ChromaService(collection_name="xxx") 直接指定）
+        #   2) 环境变量 CHROMA_COLLECTION_NAME（README 规范名，推荐）
+        #   3) 环境变量 CHROMA_COLLECTION（向后兼容历史 .env）
+        #   4) 兜底：knowledge_base
+        if collection_name:
+            resolved = collection_name
+        else:
+            resolved = (
+                os.getenv("CHROMA_COLLECTION_NAME")
+                or os.getenv("CHROMA_COLLECTION")
+                or "knowledge_base"
+            )
+        self.collection_name = str(resolved).strip() or "knowledge_base"
 
         # 使用百炼 DashScope 原生 Embedding（避免 OpenAI 兼容模式的 input.contents 问题）
         api_key = (
