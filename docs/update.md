@@ -1,5 +1,60 @@
 # 变更记录
 
+## 2026-09-04
+
+### 1. Chroma 双重 Bug 修复：冷启动 15 条 → 真实 1715 条知识库
+- **改动文件**：`src/services/chroma_service.py`、`data/chroma_db/chroma.sqlite3`（通过 commit 纳管）、本地 `.env`（不进仓库，部署必填）
+- **根因**：出现「count_documents()=15 冷启动」是两个 Bug 同时存在：
+  1. `ChromaService.__init__` 的 `collection_name` 参数被硬编码为 `"knowledge_base"`，完全忽略 `.env` 里的 `CHROMA_COLLECTION_NAME` 与兼容别名 `CHROMA_COLLECTION`；
+  2. 本地 FLA 分支此前执行 `git reset --hard main`，把 FLA 已纳入版本控制的真实 `chroma.sqlite3` 注册表冲回了 main 的 15 条。
+- **修复**：
+  1. 代码层：`src/services/chroma_service.py` 重写 collection_name 解析链为「显式非空实参 > CHROMA_COLLECTION_NAME env > CHROMA_COLLECTION env（兼容旧配置）> 默认 knowledge_base」；空字符串统一回退。
+  2. 数据层：`chroma.sqlite3` 对齐 origin/FLA-workspace @59a2bc7 版本（单 collection=knowledge_base，注册表 1715 条 = OpenAlex 离线 + arXiv 在线 + seed 合并）。
+- **部署注意**：`.env` 被 `.gitignore` 忽略不进仓库；部署时 **必须** 填入 `CHROMA_COLLECTION_NAME=knowledge_base` 与 SQLite 注册表名完全一致，否则会新建一个同名空集合并导致 count=0。
+- **验证**：`ChromaService().count_documents()` 返回值稳定为 **1715**。
+
+### 2. 本地 FLA-workspace 分支回收：丢失的 4 个 origin commit 全部吸收（纯本地引用无 --force）
+- **问题**：本地 `reset --hard main` 让 FLA 回退到 main，丢掉了远端 `origin/FLA-workspace` 上存在的 4 个 commit（59a2bc7 / 26d5867 / ccd435e / 1fc249d）。
+- **方式**：不依赖联网 pull（此前 GitHub HTTPS 偶发 Connection was reset），直接使用本地已 fetch 缓存的 `refs/remotes/origin/FLA-workspace`：
+  1. 先保存未提交工作为 stash（消息：pre-rebase-originFLA4-20260904-1157）；
+  2. `git reset --hard origin/FLA-workspace` 把本地 FLA HEAD 从 1dabed4 搬到 **1fc249d**（与 origin/FLA 完全一致）；
+  3. 再 stash pop 还原本轮本地修改，并解三处冲突（见 09-04 第 3 条）。
+- **结果**：`rev-list --left-right origin/FLA-workspace...FLA-workspace == 0 0` ✅；top-4 commit 完整回显（59a2bc7 chroma 纳管 / 26d5867 merge main / ccd435e sidebar 修复 / 1fc249d 移除多模态）。
+- **安全**：全程无 `--force`，且保留快照分支 `sync-FLA4-before = backup/FLA-before-chroma-fix-20260904-112409 = 1dabed4` 供回退。
+
+### 3. 解 stash 冲突 3 处：chroma.sqlite3 + update.md + styles.css
+- `data/chroma_db/chroma.sqlite3`（AA）：保留 HEAD = origin/FLA 的真实 1715 注册版。
+- `docs/update.md`（UU）：保留上游 origin/FLA 的 09-03 主条目（模块展示 HTML 拆分 + 浅色主题），再在 09-03 下追加本地增量条目「收起态内容宽度优化」（右栏隐藏 + chat-inner 渐进放宽），并清理合并残留的重复 `## 2026-09-03` header。
+- `web/styles.css`（UU）：保留上游 ccd435e 的 `.has-research` 选择器（收起限定到研究工作区，不污染首页），再合并本地两份新规则：
+  1. 双边收起时隐藏 `.right` 面板（visibility/opacity/border-left/pointer-events 全置空）；
+  2. 补全 `.chat-inner` 渐进宽度（单边收起 = 1040px，双边收起 = 1200px），同样挂在 `.app.has-research` 下。
+- **处理完毕后**：stash 条目 drop 清理；`git status --porcelain` 中无任何 UU/AA/AU/UA/DU/UD/DD 行。
+
+### 4. 最终提交拆分：2 个 commit 组成本次工作增量
+- **前置处理**：`git reset --mixed HEAD` 把冲突解决后自动 staged 的 5 个文件全部撤回到工作区，再按「代码类 vs 文档类」分两批 add。
+- **Commit 1（SHA：4d14101）** — 标题：`fix(chroma): 修复ChromaService未读取CHROMA_COLLECTION_NAME环境变量，并确保真实知识库(1715 docs)被正确加载`
+  - staged 仅含：`src/services/chroma_service.py`（sqlite3 和 HEAD 一致无 delta，未产生额外 diff）；全程未纳入 `data/chroma_db/16547ed5*` 的 4 个冷启动 bin 文件。
+- **Commit 2（SHA：4604afd）** — 标题：`docs & ui: 更新模块展示文档+结构说明+09-03更新日志,并补全侧栏收起态右栏隐藏与chat-inner渐进宽度`
+  - staged 仅含：`docs/ProjectPrompt.md`、`docs/ProjectStructure.md`、`docs/update.md`、`web/styles.css`。
+- **push 前置条件**：`rev-list --left-right origin/FLA-workspace...FLA-workspace = 0 2`（0 behind / 2 ahead），属纯粹 fast-forward。下一步直接 `git push origin FLA-workspace` 即可，无需 force。
+
+### 5. 清理向量库孤儿目录：删除 data/chroma_db/16547ed5…（保留真实 904ab7d8 HNSW 索引）
+- **注册表证据**：当前 `chroma.sqlite3` 中 `collections.id = 89b84cca-e96e-4fb8-adfa-83aaa3918a6b`（name=knowledge_base, dim=1024），其 HNSW segment.id = **`904ab7d8-88c8-422d-b750-7389c12425aa`**（5 个文件 / 7.7 MB，被 git 跟踪）。
+- **目录对比**：
+  - `904ab7d8…`：当前真实 HNSW 索引（5 files, 7729 KB，git-tracked=5）→ 活；绝对不能删。
+  - `16547ed5…`：无任何 collection/segment 引用（0 registry）→ 冷启动 15 条时的孤儿目录。414 KB 垃圾，git untracked。
+- **清理方式**：Move 到 `$env:TEMP\16547ed5-chroma-orphan-<timestamp>`（安全可恢复），而非直接永久删。
+- **清理后验证**：count_documents() 仍 1715；similarity_search(k=3) 返回 3 条（#1 openalex / #2 Pearl 2009 Causality / #3 Pearl 1995 Biometrika）→ HNSW 走 904 目录完全正常；git status 中 `16547ed5` untracked 行消失。
+
+### 6. 下一步工作指引（待执行）
+1. 推送到 fork 远端：`git push origin FLA-workspace`（预计 fast-forward 成功）。
+2. 推送后验证本地 SHA 与远端 `refs/heads/FLA-workspace` 完全一致（`git rev-parse FLA-workspace` vs `git ls-remote origin refs/heads/FLA-workspace`）。
+3. 在 GitHub 开 PR：
+   - **Base**：`qtbs4476/ai_scientist main`
+   - **Head**：`thisonvo06/ai_scientist FLA-workspace`
+   - PR 标题建议：`fix(chroma): env CHROMA_COLLECTION_NAME 读取 + 真实 1715-db sqlite3 恢复(cold 15→1715); 侧栏收起宽度+docs更新`
+   - PR 主体要点：ChromaService 双环境变量回退链、chroma.sqlite3 从 FLA 真实版本恢复（含真实 HNSW 904ab7d8 segment UUID，已被 59a2bc7 纳管进 git）、首页不受影响的侧栏 has-research 限定 + chat-inner 渐进宽度、文档更新说明、孤儿 16547ed5 目录已从工作区清理（已在本机未跟踪层面删除）。
+
 ## 2026-09-03
 
 ### 1. 新建前端视频模块展示文件
